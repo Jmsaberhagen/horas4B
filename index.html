@@ -509,19 +509,95 @@ textarea.fc{resize:none;height:60px}
 }
 .btn-exp:hover{border-color:var(--gl);color:var(--gl)}
 
+/* MINI STATS — mobile-only compact sticky header (hidden on desktop) */
+.mini-stats{
+  display:none; /* shown only under the mobile media query below */
+  align-items:center;gap:8px;
+  position:sticky;top:52px;z-index:40;
+  background:var(--s2);border-bottom:1px solid var(--border);
+  padding:8px 1rem;
+}
+.mini-stats-label{font-size:9px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--t3);flex-shrink:0}
+.mini-stats-value{font-size:16px;font-weight:800;color:var(--gn);flex-shrink:0}
+.mini-stats-total{font-size:10px;color:var(--t3);flex-shrink:0}
+.mini-stats-track{flex:1;height:5px;border-radius:3px;background:rgba(255,255,255,.08);overflow:hidden;margin-left:4px}
+.mini-stats-fill{height:100%;border-radius:3px;width:100%;background:linear-gradient(90deg,var(--gl),var(--gn));transition:width .4s,background .4s}
+
+/* DAY SWITCHER — mobile-only agenda-style day navigator (hidden on desktop) */
+.day-switcher{
+  display:none; /* shown only under the mobile media query below */
+  align-items:center;justify-content:space-between;gap:10px;
+  padding:.9rem 1rem .6rem;
+}
+.day-switcher-label{text-align:center;flex:1}
+.day-switcher-label .dsw-name{font-size:13px;font-weight:800;letter-spacing:.06em;text-transform:uppercase}
+.day-switcher-label .dsw-name.today{color:var(--gn)}
+.day-switcher-label .dsw-date{font-size:10px;color:var(--t3);margin-top:1px}
+.day-nav-btn{
+  width:34px;height:34px;border-radius:50%;border:1px solid var(--border);
+  background:var(--s2);color:var(--text);font-size:16px;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .15s;
+}
+.day-nav-btn:hover{border-color:var(--g);color:var(--gn)}
+.day-nav-btn:disabled{opacity:.3;cursor:default}
+
+.day-list{display:none;flex-direction:column;gap:8px;padding:0 1rem 1rem} /* shown only on mobile */
+.day-list .dl-recreo{
+  text-align:center;font-size:9px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--t3);padding:6px 0;
+}
+.day-list .dl-slot{
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+  background:var(--s3);border-radius:6px;padding:12px 14px;position:relative;overflow:hidden;
+}
+.day-list .dl-slot::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--g);opacity:.5}
+.day-list .dl-slot.absent{background:rgba(231,72,86,.13)}
+.day-list .dl-slot.absent::before{background:var(--danger);opacity:1}
+.day-list .dl-slot.empty{background:var(--s1);opacity:.5}
+.day-list .dl-hora{font-size:9px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--t2);margin-bottom:3px}
+.day-list .dl-slot.absent .dl-hora{color:var(--danger)}
+.day-list .dl-mat{font-size:14px;font-weight:700}
+.day-list .dl-slot.absent .dl-mat{color:var(--danger)}
+.day-list .dl-doc{font-size:11px;color:var(--t3);margin-top:1px}
+.day-list .dl-action{
+  width:30px;height:30px;border-radius:50%;flex-shrink:0;
+  background:rgba(255,255,255,.07);display:flex;align-items:center;justify-content:center;
+  font-size:15px;color:var(--t2);
+}
+.day-list .dl-slot.absent .dl-action{background:rgba(231,72,86,.2);color:var(--danger)}
+
 @media(max-width:700px){
-  .stats{grid-template-columns:repeat(2,1fr)}
+  .mini-stats{display:flex}
+  .stats{
+    grid-template-columns:repeat(2,1fr);
+    position:static; /* the 4 full cards no longer stick — only mini-stats does,
+                         so nothing piles up on top of the schedule anymore */
+    box-shadow:none;
+  }
   .stat:first-child{border-radius:6px 6px 0 0;grid-column:1/-1}
   .stat:nth-child(2){border-radius:0}
   .stat:nth-child(3){border-radius:0}
   .stat:last-child{border-radius:0 0 6px 6px}
-  .cal-wrap{padding:0 1rem 1rem}
+  .cal-wrap{display:none} /* desktop table is replaced by the day-list below */
+  .day-switcher,.day-list{display:flex}
   .cal-header,.exp-bar,.hist-wrap{padding-left:1rem;padding-right:1rem}
   .stats{margin:1rem 1rem 0}
   .breakdown{margin:0 1rem}
   nav{padding:0 1rem}
   .nav-s{display:none}
+
+  /* Modals go near-full-width and scroll internally instead of overflowing */
+  .modal,.modal-wide,.modal-xwide{width:94vw;max-height:88vh}
+  .fg-row{grid-template-columns:1fr}
+  .clase-row{grid-template-columns:1fr 1fr 30px}
+  .mod-row{grid-template-columns:1fr;gap:8px}
+  .mod-row label{justify-content:flex-start}
+
+  /* Week popover: fixed width + right:0 anchored to a button near the edge
+     of a narrow screen would overflow off-screen — clamp it to the viewport. */
+  .week-pop{width:min(280px,calc(100vw - 2rem));right:-1rem}
 }
+
 ::-webkit-scrollbar{width:5px;height:5px}
 ::-webkit-scrollbar-track{background:var(--bg)}
 ::-webkit-scrollbar-thumb{background:#2a2a2a;border-radius:3px}
@@ -585,6 +661,16 @@ textarea.fc{resize:none;height:60px}
   </div>
 </nav>
 
+<!-- Compact sticky bar, mobile only: shows just the one number that matters
+     at a glance, so nothing piles up on top of the schedule like the full
+     stat cards used to when they were sticky on a narrow screen. -->
+<div class="mini-stats" id="miniStats">
+  <span class="mini-stats-label">Horas restantes</span>
+  <span class="mini-stats-value" id="miniRemain">0</span>
+  <span class="mini-stats-total">/ <span id="miniRemainTotal">0</span></span>
+  <div class="mini-stats-track"><div class="mini-stats-fill" id="miniBar"></div></div>
+</div>
+
 <div class="stats" id="statsBar">
   <div class="stat stat-progress">
     <div class="stat-l">Horas restantes esta semana</div>
@@ -624,7 +710,16 @@ textarea.fc{resize:none;height:60px}
   </div>
 </div>
 
-<div class="cal-wrap">
+<!-- Mobile-only day switcher: shows one day at a time instead of forcing a
+     5-column table into a narrow screen. Hidden on desktop via CSS. -->
+<div class="day-switcher" id="daySwitcher">
+  <button class="day-nav-btn" type="button" id="dayPrevBtn" aria-label="Día anterior">‹</button>
+  <div class="day-switcher-label" id="daySwitcherLabel"></div>
+  <button class="day-nav-btn" type="button" id="dayNextBtn" aria-label="Día siguiente">›</button>
+</div>
+<div class="day-list" id="dayList"></div>
+
+<div class="cal-wrap" id="calWrap">
   <table class="cal" id="calTable">
     <colgroup>
       <col>
@@ -1217,6 +1312,87 @@ function totalSlots(){
   return t;
 }
 
+// ── MOBILE DAY SWITCHER ──────────────────────────────────────────────────────
+// Lets a phone screen show one day at a time (agenda-style) instead of forcing
+// a 5-column table into a narrow viewport. Purely additive: the desktop table
+// (#calTable) keeps working exactly as before; this just feeds a second view
+// (#dayList) that CSS shows instead of the table under the mobile breakpoint.
+let _selectedDia = null; // 'LU'..'VI' — which day the day-switcher is showing
+
+function defaultDia(){
+  const t = todayDia();
+  return t || 'LU'; // weekends default to Monday since there's no class to show
+}
+
+function renderDaySwitcher(week, today, showingCurrentWeek, isAbsent){
+  if(!_selectedDia) _selectedDia = defaultDia();
+  const idx = DIAS.indexOf(_selectedDia);
+
+  // Label + today badge
+  const isTod = showingCurrentWeek && _selectedDia===today;
+  const dateStr = fmtDate(diaDate(week,_selectedDia));
+  document.getElementById('daySwitcherLabel').innerHTML = `
+    <div class="dsw-name ${isTod?'today':''}">${DIA_FULL[_selectedDia]}${isTod?' · HOY':''}</div>
+    <div class="dsw-date">${dateStr}</div>
+  `;
+  document.getElementById('dayPrevBtn').disabled = idx<=0;
+  document.getElementById('dayNextBtn').disabled = idx>=DIAS.length-1;
+
+  // Body: one row per módulo for the selected day, recreos as plain separators
+  const list = document.getElementById('dayList');
+  let html = '';
+  HORAS.forEach(hr=>{
+    if(hr.recreo){
+      html += `<div class="dl-recreo">${hr.label}</div>`;
+      return;
+    }
+    const slot = SCHEDULE[_selectedDia] && SCHEDULE[_selectedDia][hr.h];
+    if(!slot){
+      html += `<div class="dl-slot empty"><div class="dl-hora">${hr.label}</div></div>`;
+      return;
+    }
+    const absent = isAbsent(slot.mid, _selectedDia, hr.h);
+    const aid = absent ? absences.find(a=>a.week===week&&a.dia===_selectedDia&&a.hora===hr.h&&a.mid===slot.mid)?.id : null;
+    html += `<div class="dl-slot ${absent?'absent':''}"
+        ${absent?'':`data-action="quickadd" data-mid="${slot.mid}" data-dia="${_selectedDia}" data-hora="${hr.h}"`}>
+      <div>
+        <div class="dl-hora">${hr.label}</div>
+        <div class="dl-mat">${slot.nombre}</div>
+        <div class="dl-doc">${slot.docente}</div>
+      </div>
+      <div class="dl-action" ${absent&&aid?`data-action="delete" data-id="${aid}"`:''}>
+        ${absent?'✕':'+'}
+      </div>
+    </div>`;
+  });
+  list.innerHTML = html;
+}
+
+document.getElementById('dayPrevBtn').addEventListener('click', ()=>{
+  const idx = DIAS.indexOf(_selectedDia);
+  if(idx>0){ _selectedDia = DIAS[idx-1]; render(); }
+});
+document.getElementById('dayNextBtn').addEventListener('click', ()=>{
+  const idx = DIAS.indexOf(_selectedDia);
+  if(idx<DIAS.length-1){ _selectedDia = DIAS[idx+1]; render(); }
+});
+
+// Same delegated quickadd/delete pattern used for the desktop table — the
+// day-list rows use the identical data-action/data-mid/data-dia/data-hora
+// attributes, so one shared handler covers both views.
+document.getElementById('dayList').addEventListener('click', e=>{
+  const delBtn = e.target.closest('[data-action="delete"]');
+  if(delBtn){
+    e.stopPropagation();
+    deleteAbs(Number(delBtn.dataset.id));
+    return;
+  }
+  const addEl = e.target.closest('[data-action="quickadd"]');
+  if(addEl){
+    quickAdd(addEl.dataset.mid, addEl.dataset.dia, addEl.dataset.hora);
+  }
+});
+
 // ── RENDER ───────────────────────────────────────────────────────────────────
 function render(){
   const week = currentWeek();
@@ -1251,20 +1427,31 @@ function render(){
   document.getElementById('s-week').textContent=weekAbs;
   document.getElementById('s-total').textContent=totalAbs;
   document.getElementById('s-worst').textContent=worst;
+  document.getElementById('miniRemain').textContent=remaining;
+  document.getElementById('miniRemainTotal').textContent=weekTotal;
 
   // Progress bar: green at 100%, shifts to amber then red as hours are lost
   const bar=document.getElementById('s-bar');
+  const miniBar=document.getElementById('miniBar');
   const remainV=document.getElementById('s-remain');
+  const miniRemainV=document.getElementById('miniRemain');
   bar.style.width=pct+'%';
+  miniBar.style.width=pct+'%';
   if(pct>=70){
     bar.style.background='linear-gradient(90deg,var(--gl),var(--gn))';
+    miniBar.style.background='linear-gradient(90deg,var(--gl),var(--gn))';
     remainV.style.color='var(--gn)';
+    miniRemainV.style.color='var(--gn)';
   } else if(pct>=40){
     bar.style.background='linear-gradient(90deg,var(--warn),#ffd35c)';
+    miniBar.style.background='linear-gradient(90deg,var(--warn),#ffd35c)';
     remainV.style.color='var(--warn)';
+    miniRemainV.style.color='var(--warn)';
   } else {
     bar.style.background='linear-gradient(90deg,var(--danger),#ff7a85)';
+    miniBar.style.background='linear-gradient(90deg,var(--danger),#ff7a85)';
     remainV.style.color='var(--danger)';
+    miniRemainV.style.color='var(--danger)';
   }
 
   // Breakdown panel (per-subject, this week): rebuilt every render, shown if open
@@ -1341,6 +1528,9 @@ function render(){
   });
 
   document.getElementById('calBody').innerHTML=body;
+
+  // ── MOBILE: single-day agenda view ──
+  renderDaySwitcher(week, today, showingCurrentWeek, isAbsent);
 
   // ── HISTORY ──
   const recent=[...absences].reverse().slice(0,40);
