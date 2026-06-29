@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>4B — Horas Cátedra</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
 :root {
   --g: #107C10;
@@ -567,7 +568,49 @@ const MATERIAS = [
   {id:'ingles2',  nombre:'Inglés (Lindon)',   docente:'Lindon y Cejas'},
 ];
 
-let absences = JSON.parse(localStorage.getItem('abs4b_v2') || '[]');
+// ── SUPABASE ─────────────────────────────────────────────────────────────────
+const SUPABASE_URL = 'https://axxmgcfeufbiaxirpvoo.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF4eG1nY2ZldWZiaWF4aXJwdm9vIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI3MTk5NTksImV4cCI6MjA5ODI5NTk1OX0.5DzpY8uhrbhDKrubHcEaGWXgOfMBuOU6cB3X5DbQm9A';
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// Local cache key (used as instant-load fallback / offline backup, NOT source of truth)
+const CACHE_KEY = 'abs4b_v2_cache';
+
+// absences is the in-memory source the rest of the app reads from.
+// Seed it from localStorage so the UI has something to show immediately,
+// then refresh from Supabase as soon as the network call resolves.
+let absences = JSON.parse(localStorage.getItem(CACHE_KEY) || '[]');
+
+function cacheAbsences(){
+  localStorage.setItem(CACHE_KEY, JSON.stringify(absences));
+}
+
+// Map a Supabase row to the shape the rest of the app expects (it keys off `id`, `ts`, etc.)
+function fromRow(row){
+  return { id:row.id, mid:row.mid, dia:row.dia, hora:row.hora, week:row.week,
+           obs:row.obs||'', docente:row.docente||'', ts:row.ts };
+}
+
+async function loadAbsences(){
+  const {data, error} = await sb.from('ausencias').select('*').order('ts',{ascending:true});
+  if(error){
+    console.error('Error cargando ausencias de Supabase:', error);
+    showToast('Sin conexión — mostrando datos guardados localmente');
+    return; // keep whatever was in the local cache
+  }
+  absences = data.map(fromRow);
+  cacheAbsences();
+  render();
+}
+
+// Live sync: if the data changes from another device/tab, reflect it here automatically.
+function subscribeRealtime(){
+  sb.channel('ausencias-changes')
+    .on('postgres_changes', {event:'*', schema:'public', table:'ausencias'}, ()=>{
+      loadAbsences();
+    })
+    .subscribe();
+}
 
 // ── UTILS ────────────────────────────────────────────────────────────────────
 function getISOWeek(d){
@@ -616,7 +659,8 @@ function isCurrentWeek(ws){
 // Key for an absence lookup: week+dia+hora+mid
 function absKey(a){ return `${a.week}|${a.dia}|${a.hora}|${a.mid}`; }
 
-function save(){ localStorage.setItem('abs4b_v2',JSON.stringify(absences)); render(); }
+// NOTE: persistence now goes through Supabase (see saveAbsence/deleteAbs below).
+// localStorage is only used as a read cache via cacheAbsences(), not as the source of truth.
 
 function toggleBreakdown(){
   document.getElementById('breakdown').classList.toggle('open');
@@ -744,13 +788,13 @@ function render(){
       body+=`<td class="cell ${isTod?'today-col':''}">
         <div class="slot">
           <div class="slot-inner ${absent?'absent':''}"
-               onclick="${absent?'':'`quickAdd(\''+slot.mid+'\',\''+d+'\',\''+hr.h+'\')`'}"
-               style="${absent?'cursor:default':''}">
+               ${absent?'':`data-action="quickadd" data-mid="${slot.mid}" data-dia="${d}" data-hora="${hr.h}"`}
+               style="${absent?'cursor:default':'cursor:pointer'}">
             <div>
               <div style="font-size:11px;font-weight:700;color:${absent?'var(--danger)':'var(--text)'}">${slot.nombre}</div>
               <div style="font-size:9px;color:${absent?'rgba(231,72,86,.6)':'var(--t3)'};margin-top:1px">${slot.docente}</div>
             </div>
-            <div class="slot-plus" onclick="${absent&&aid?`event.stopPropagation();deleteAbs(${aid})`:''}">
+            <div class="slot-plus" ${absent&&aid?`data-action="delete" data-id="${aid}"`:''}>
               ${absent?'✕':'+'}
             </div>
           </div>
@@ -847,7 +891,7 @@ function onDiaChange(){
 
 function closeModal(){ document.getElementById('overlay').classList.remove('open'); }
 
-function saveAbsence(){
+async function saveAbsence(){
   const mid   = document.getElementById('mSel').value;
   const dia   = document.getElementById('diaSel').value;
   const hora  = document.getElementById('horaSel').value;
@@ -861,17 +905,41 @@ function saveAbsence(){
     closeModal(); return;
   }
   const s=SCHEDULE[dia]&&SCHEDULE[dia][hora];
-  absences.push({
-    id:Date.now(), mid, dia, hora, week, obs,
-    docente:s?s.docente:'',
-    ts:new Date().toISOString()
-  });
-  save(); closeModal(); showToast('Ausencia registrada');
+  const docente = s?s.docente:'';
+  closeModal();
+
+  const {data, error} = await sb.from('ausencias')
+    .insert({mid, dia, hora, week, obs, docente})
+    .select()
+    .single();
+
+  if(error){
+    console.error('Error guardando ausencia:', error);
+    showToast('No se pudo guardar — revisá tu conexión');
+    return;
+  }
+  absences.push(fromRow(data));
+  cacheAbsences();
+  render();
+  showToast('Ausencia registrada');
 }
 
-function deleteAbs(id){
-  absences=absences.filter(a=>a.id!==id);
-  save(); showToast('Registro eliminado');
+async function deleteAbs(id){
+  const prev = absences;
+  absences = absences.filter(a=>a.id!==id);
+  cacheAbsences();
+  render(); // optimistic update — feels instant
+
+  const {error} = await sb.from('ausencias').delete().eq('id', id);
+  if(error){
+    console.error('Error borrando ausencia:', error);
+    absences = prev; // revert if the server rejected it
+    cacheAbsences();
+    render();
+    showToast('No se pudo eliminar — revisá tu conexión');
+    return;
+  }
+  showToast('Registro eliminado');
 }
 
 function showToast(msg){
@@ -901,11 +969,29 @@ document.getElementById('overlay').addEventListener('click',e=>{
   if(e.target===e.currentTarget) closeModal();
 });
 
+// Delegated click handler for calendar slots (quick-add ausencia / delete)
+// Using data-attributes instead of inline onclick avoids string-escaping bugs
+// when materia/dia/hora values get interpolated into the generated HTML.
+document.getElementById('calBody').addEventListener('click', e=>{
+  const delBtn = e.target.closest('[data-action="delete"]');
+  if(delBtn){
+    e.stopPropagation();
+    deleteAbs(Number(delBtn.dataset.id));
+    return;
+  }
+  const addEl = e.target.closest('[data-action="quickadd"]');
+  if(addEl){
+    quickAdd(addEl.dataset.mid, addEl.dataset.dia, addEl.dataset.hora);
+  }
+});
+
 // Init
 const wi=document.getElementById('weekInput');
 wi.value=getISOWeek();
 wi.addEventListener('change',render);
-render();
+render();           // instant paint using whatever was cached locally
+loadAbsences();      // then refresh with the real data from Supabase
+subscribeRealtime(); // and stay in sync if it changes from another device
 </script>
 </body>
 </html>
