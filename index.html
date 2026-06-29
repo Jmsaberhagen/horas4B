@@ -53,6 +53,35 @@ nav{
 .nav-s{font-size:10px;color:var(--t2);letter-spacing:.1em;text-transform:uppercase}
 .nav-r{display:flex;align-items:center;gap:8px}
 .nav-r label{font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:.08em}
+.logout-btn{
+  width:30px;height:30px;border-radius:var(--r);border:1px solid var(--border);
+  background:var(--s2);color:var(--t3);cursor:pointer;font-size:13px;
+  display:flex;align-items:center;justify-content:center;transition:all .15s;flex-shrink:0;
+}
+.logout-btn:hover{border-color:var(--danger);color:var(--danger)}
+
+/* LOGIN SCREEN */
+.login-screen{
+  position:fixed;inset:0;z-index:1000;
+  background:var(--bg);
+  display:flex;align-items:center;justify-content:center;
+  opacity:0;pointer-events:none;transition:opacity .2s;
+}
+.login-screen.open{opacity:1;pointer-events:all}
+.login-box{
+  width:min(360px,90vw);background:var(--s2);
+  border:1px solid rgba(16,124,16,.25);border-radius:10px;
+  padding:2.2rem 1.8rem;
+  box-shadow:0 0 50px rgba(16,124,16,.12),0 12px 40px rgba(0,0,0,.6);
+  text-align:center;
+}
+.login-logo{display:flex;justify-content:center;margin-bottom:1rem}
+.login-title{font-size:16px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;margin-bottom:3px}
+.login-sub{font-size:11px;color:var(--t3);margin-bottom:1.6rem}
+.login-box .fg{text-align:left}
+.login-error{color:var(--danger);font-size:11px;min-height:14px;margin:2px 0 .8rem;text-align:left}
+.login-submit{width:100%;padding:10px 18px;font-size:12px}
+.login-submit:disabled{opacity:.6;cursor:default}
 /* WEEK PICKER (custom, replaces the native <input type=week> in the nav
    so we can highlight weeks that contain absences — the native picker
    doesn't allow styling individual dates). */
@@ -500,6 +529,36 @@ textarea.fc{resize:none;height:60px}
 </head>
 <body>
 
+<!-- LOGIN SCREEN -->
+<div class="login-screen" id="loginScreen">
+  <div class="login-box">
+    <div class="login-logo">
+      <div class="xbtn" style="width:38px;height:38px">
+        <svg viewBox="0 0 20 20" fill="none" style="width:20px;height:20px">
+          <circle cx="10" cy="10" r="9" stroke="white" stroke-width="1.5"/>
+          <path d="M10 4v12M4 10h12" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+      </div>
+    </div>
+    <div class="login-title">4B — Horas Cátedra</div>
+    <div class="login-sub">Iniciá sesión para continuar</div>
+
+    <div class="fg">
+      <label class="fl">Email</label>
+      <input class="fc" id="loginEmail" type="email" autocomplete="username" placeholder="tu@email.com">
+    </div>
+    <div class="fg">
+      <label class="fl">Contraseña</label>
+      <input class="fc" id="loginPassword" type="password" autocomplete="current-password" placeholder="••••••••">
+    </div>
+    <div class="login-error" id="loginError"></div>
+    <button class="btn-save login-submit" id="loginSubmitBtn" onclick="doLogin()">Ingresar</button>
+  </div>
+</div>
+
+<!-- APP (hidden until authenticated) -->
+<div id="appRoot" style="display:none">
+
 <nav>
   <div class="logo">
     <div class="xbtn">
@@ -522,6 +581,7 @@ textarea.fc{resize:none;height:60px}
       </button>
       <div class="week-pop" id="weekPop"></div>
     </div>
+    <button class="logout-btn" type="button" onclick="logout()" title="Cerrar sesión">⏻</button>
   </div>
 </nav>
 
@@ -763,6 +823,118 @@ try {
 } catch(err) {
   console.error('No se pudo inicializar el cliente de Supabase:', err);
 }
+
+// ── AUTH ─────────────────────────────────────────────────────────────────────
+// Gate: nothing in the app talks to Supabase until there's a confirmed session.
+// Supabase persists the session in localStorage by default, so once logged in
+// on a device, reopening the app later won't ask again unless the session
+// expires or the person logs out explicitly.
+
+async function initAuth(){
+  if(!sb){
+    // No Supabase client at all (CDN failed) — can't verify anyone, so show
+    // an error on the login screen instead of silently unlocking the app.
+    document.getElementById('loginError').textContent = 'No se pudo conectar con el servidor de autenticación. Revisá tu conexión y recargá la página.';
+    return;
+  }
+  try {
+    const {data, error} = await sb.auth.getSession();
+    if(error){ console.error('Error verificando sesión:', error); }
+    if(data && data.session){
+      bootApp();
+    } else {
+      showLoginScreen();
+    }
+  } catch(err){
+    console.error('Excepción verificando sesión:', err);
+    showLoginScreen();
+  }
+
+  // Keep the gate in sync if the session changes elsewhere (e.g. token expires,
+  // or the person logs out from another tab).
+  sb.auth.onAuthStateChange((_event, session)=>{
+    if(session){
+      bootApp();
+    } else {
+      document.getElementById('appRoot').style.display='none';
+      showLoginScreen();
+    }
+  });
+}
+
+function showLoginScreen(){
+  document.getElementById('loginScreen').classList.add('open');
+  document.getElementById('appRoot').style.display='none';
+}
+
+function hideLoginScreen(){
+  document.getElementById('loginScreen').classList.remove('open');
+}
+
+let _appBooted = false;
+function bootApp(){
+  hideLoginScreen();
+  document.getElementById('appRoot').style.display='';
+  if(_appBooted) return; // avoid re-running the boot sequence on every auth event
+  _appBooted = true;
+  loadHorario();
+  render();
+  loadAbsences();
+  subscribeRealtime();
+}
+
+async function doLogin(){
+  const email = document.getElementById('loginEmail').value.trim();
+  const password = document.getElementById('loginPassword').value;
+  const errEl = document.getElementById('loginError');
+  const btn = document.getElementById('loginSubmitBtn');
+  errEl.textContent = '';
+
+  if(!email || !password){
+    errEl.textContent = 'Completá email y contraseña.';
+    return;
+  }
+  if(!sb){
+    errEl.textContent = 'No hay conexión con el servidor de autenticación.';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Ingresando…';
+  try {
+    const {error} = await sb.auth.signInWithPassword({email, password});
+    if(error){
+      errEl.textContent = 'Email o contraseña incorrectos.';
+      console.error('Error de login:', error);
+      return;
+    }
+    // onAuthStateChange will fire and call bootApp() automatically
+  } catch(err){
+    console.error('Excepción en login:', err);
+    errEl.textContent = 'No se pudo iniciar sesión — revisá tu conexión.';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Ingresar';
+  }
+}
+
+async function logout(){
+  if(!sb) return;
+  try {
+    await sb.auth.signOut();
+  } catch(err){
+    console.error('Error cerrando sesión:', err);
+  }
+  // onAuthStateChange will fire and show the login screen automatically
+}
+
+// Let the person hit Enter from either field instead of having to click the button
+document.getElementById('loginPassword').addEventListener('keydown', e=>{
+  if(e.key==='Enter') doLogin();
+});
+document.getElementById('loginEmail').addEventListener('keydown', e=>{
+  if(e.key==='Enter') document.getElementById('loginPassword').focus();
+});
 
 // Local cache key (used as instant-load fallback / offline backup, NOT source of truth)
 const CACHE_KEY = 'abs4b_v2_cache';
@@ -1934,10 +2106,8 @@ document.addEventListener('click', e=>{
 
 // Init
 updateWeekBtnLabel();
-loadHorario();        // seeds from local cache synchronously-ish, then refreshes from Supabase
-render();             // instant paint using whatever was cached locally
-loadAbsences();       // then refresh with the real data from Supabase
-subscribeRealtime();  // and stay in sync if it changes from another device
+initAuth(); // checks session first; only boots the app (loadHorario/loadAbsences/etc.) if logged in
 </script>
+</div> <!-- /#appRoot -->
 </body>
 </html>
