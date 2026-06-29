@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>4B — Horas Cátedra</title>
+<title>Gestión de Hs Académicas</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -82,6 +82,23 @@ nav{
 .login-error{color:var(--danger);font-size:11px;min-height:14px;margin:2px 0 .8rem;text-align:left}
 .login-submit{width:100%;padding:10px 18px;font-size:12px}
 .login-submit:disabled{opacity:.6;cursor:default}
+
+/* COURSE PICKER */
+.curso-box{width:min(380px,90vw)}
+.curso-list{display:flex;flex-direction:column;gap:8px;max-height:40vh;overflow-y:auto;margin-bottom:.9rem;text-align:left}
+.curso-item{
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+  background:var(--s3);border:1px solid var(--border);border-radius:6px;
+  padding:12px 14px;cursor:pointer;transition:all .15s;
+}
+.curso-item:hover{border-color:var(--g);background:var(--s4)}
+.curso-item-name{font-size:13px;font-weight:700}
+.curso-item-arrow{color:var(--t3);font-size:14px}
+.curso-empty{font-size:11px;color:var(--t3);text-align:center;padding:1rem 0}
+.curso-new-row{display:flex;gap:7px}
+.curso-new-row .fc{flex:1}
+.curso-new-row .btn-icon{width:36px;height:36px;font-size:16px;border-color:var(--g);color:var(--gl)}
+.curso-new-row .btn-icon:hover{background:var(--g);color:#fff}
 /* WEEK PICKER (custom, replaces the native <input type=week> in the nav
    so we can highlight weeks that contain absences — the native picker
    doesn't allow styling individual dates). */
@@ -616,7 +633,7 @@ textarea.fc{resize:none;height:60px}
         </svg>
       </div>
     </div>
-    <div class="login-title">4B — Horas Cátedra</div>
+    <div class="login-title">Gestión de Hs Académicas</div>
     <div class="login-sub">Iniciá sesión para continuar</div>
 
     <div class="fg">
@@ -632,6 +649,30 @@ textarea.fc{resize:none;height:60px}
   </div>
 </div>
 
+<!-- COURSE PICKER (shown after login, before the app) -->
+<div class="login-screen" id="cursoScreen">
+  <div class="login-box curso-box">
+    <div class="login-logo">
+      <div class="xbtn" style="width:38px;height:38px">
+        <svg viewBox="0 0 20 20" fill="none" style="width:20px;height:20px">
+          <circle cx="10" cy="10" r="9" stroke="white" stroke-width="1.5"/>
+          <path d="M10 4v12M4 10h12" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+      </div>
+    </div>
+    <div class="login-title">Elegí un curso</div>
+    <div class="login-sub">Podés crear y administrar varios cursos</div>
+
+    <div class="curso-list" id="cursoList"></div>
+
+    <div class="curso-new-row" id="cursoNewRow">
+      <input class="fc" id="cursoNewInput" placeholder="ej: 5° A">
+      <button class="btn-icon add" type="button" onclick="createCurso()" title="Crear curso">+</button>
+    </div>
+    <div class="login-error" id="cursoError"></div>
+  </div>
+</div>
+
 <!-- APP (hidden until authenticated) -->
 <div id="appRoot" style="display:none">
 
@@ -644,7 +685,7 @@ textarea.fc{resize:none;height:60px}
       </svg>
     </div>
     <div>
-      <div class="nav-t">4B &nbsp;·&nbsp; Horas Cátedra</div>
+      <div class="nav-t" id="navCursoLabel">Gestión de Hs Académicas</div>
       <div class="nav-s">Seguimiento de ausencias</div>
     </div>
   </div>
@@ -657,6 +698,7 @@ textarea.fc{resize:none;height:60px}
       </button>
       <div class="week-pop" id="weekPop"></div>
     </div>
+    <button class="logout-btn" type="button" onclick="changeCurso()" title="Cambiar de curso">⇄</button>
     <button class="logout-btn" type="button" onclick="logout()" title="Cerrar sesión">⏻</button>
   </div>
 </nav>
@@ -789,7 +831,7 @@ textarea.fc{resize:none;height:60px}
       </div>
       <div class="fg">
         <label class="fl">Curso</label>
-        <input class="fc" id="repCurso" value="4° B">
+        <input class="fc" id="repCurso" placeholder="ej: 4° B">
       </div>
     </div>
     <div class="fg-row">
@@ -936,7 +978,7 @@ async function initAuth(){
     const {data, error} = await sb.auth.getSession();
     if(error){ console.error('Error verificando sesión:', error); }
     if(data && data.session){
-      bootApp();
+      showCursoScreen();
     } else {
       showLoginScreen();
     }
@@ -949,9 +991,15 @@ async function initAuth(){
   // or the person logs out from another tab).
   sb.auth.onAuthStateChange((_event, session)=>{
     if(session){
-      bootApp();
+      // Only jump to the course picker on a fresh sign-in — a token refresh
+      // firing this same event shouldn't yank the user out of the app they're
+      // already using back to the picker screen.
+      if(!_appBooted) showCursoScreen();
     } else {
       document.getElementById('appRoot').style.display='none';
+      document.getElementById('cursoScreen').classList.remove('open');
+      _appBooted = false;
+      _cursoActivo = null;
       showLoginScreen();
     }
   });
@@ -959,6 +1007,7 @@ async function initAuth(){
 
 function showLoginScreen(){
   document.getElementById('loginScreen').classList.add('open');
+  document.getElementById('cursoScreen').classList.remove('open');
   document.getElementById('appRoot').style.display='none';
 }
 
@@ -966,11 +1015,109 @@ function hideLoginScreen(){
   document.getElementById('loginScreen').classList.remove('open');
 }
 
+// ── CURSOS ───────────────────────────────────────────────────────────────────
+let _cursoActivo = null; // {id, nombre} — the course the app is currently scoped to
+
+async function showCursoScreen(){
+  hideLoginScreen();
+  document.getElementById('appRoot').style.display='none';
+  document.getElementById('cursoScreen').classList.add('open');
+  await loadCursos();
+}
+
+async function loadCursos(){
+  const list = document.getElementById('cursoList');
+  const errEl = document.getElementById('cursoError');
+  errEl.textContent = '';
+  if(!sb){
+    errEl.textContent = 'Sin conexión — no se pudieron cargar los cursos.';
+    return;
+  }
+  try {
+    const {data, error} = await sb.from('cursos').select('*').order('nombre',{ascending:true});
+    if(error){
+      console.error('Error cargando cursos:', error);
+      errEl.textContent = 'No se pudieron cargar los cursos — revisá tu conexión.';
+      return;
+    }
+    if(!data.length){
+      list.innerHTML = '<div class="curso-empty">Todavía no creaste ningún curso. Usá el campo de abajo para empezar.</div>';
+      return;
+    }
+    list.innerHTML = data.map(c=>`
+      <div class="curso-item" data-id="${c.id}" data-nombre="${(c.nombre||'').replace(/"/g,'&quot;')}">
+        <span class="curso-item-name">${c.nombre}</span>
+        <span class="curso-item-arrow">→</span>
+      </div>
+    `).join('');
+  } catch(err){
+    console.error('Excepción cargando cursos:', err);
+    errEl.textContent = 'No se pudieron cargar los cursos — revisá tu conexión.';
+  }
+}
+
+document.getElementById('cursoList').addEventListener('click', e=>{
+  const item = e.target.closest('.curso-item');
+  if(item){
+    selectCurso(Number(item.dataset.id), item.dataset.nombre);
+  }
+});
+
+async function createCurso(){
+  const input = document.getElementById('cursoNewInput');
+  const errEl = document.getElementById('cursoError');
+  const nombre = input.value.trim();
+  errEl.textContent = '';
+  if(!nombre){
+    errEl.textContent = 'Escribí un nombre para el curso, ej: "5° A".';
+    return;
+  }
+  if(!sb){
+    errEl.textContent = 'Sin conexión — no se pudo crear el curso.';
+    return;
+  }
+  try {
+    const {data, error} = await sb.from('cursos').insert({nombre}).select().single();
+    if(error){
+      console.error('Error creando curso:', error);
+      errEl.textContent = 'No se pudo crear el curso — revisá tu conexión.';
+      return;
+    }
+    input.value = '';
+    await loadCursos();
+    showToast(`Curso "${nombre}" creado`);
+  } catch(err){
+    console.error('Excepción creando curso:', err);
+    errEl.textContent = 'No se pudo crear el curso — revisá tu conexión.';
+  }
+}
+
+document.getElementById('cursoNewInput').addEventListener('keydown', e=>{
+  if(e.key==='Enter') createCurso();
+});
+
+function selectCurso(id, nombre){
+  _cursoActivo = {id, nombre};
+  seedAbsencesFromCache(); // instant paint with whatever this course had cached, before the real fetch
+  document.getElementById('cursoScreen').classList.remove('open');
+  document.getElementById('appRoot').style.display='';
+  document.getElementById('navCursoLabel').textContent = nombre;
+  document.title = `${nombre} — Gestión de Hs Académicas`;
+  bootApp();
+}
+
+function changeCurso(){
+  // Going back to the picker doesn't log the person out — just re-shows the
+  // course list so they can scope the app to a different course.
+  _appBooted = false; // allow bootApp() to re-run its load sequence for the next course
+  document.getElementById('appRoot').style.display='none';
+  document.getElementById('cursoScreen').classList.add('open');
+  loadCursos();
+}
+
 let _appBooted = false;
 function bootApp(){
-  hideLoginScreen();
-  document.getElementById('appRoot').style.display='';
-  if(_appBooted) return; // avoid re-running the boot sequence on every auth event
+  if(_appBooted) return; // avoid re-running the boot sequence redundantly
   _appBooted = true;
   loadHorario();
   render();
@@ -1031,16 +1178,25 @@ document.getElementById('loginEmail').addEventListener('keydown', e=>{
   if(e.key==='Enter') document.getElementById('loginPassword').focus();
 });
 
-// Local cache key (used as instant-load fallback / offline backup, NOT source of truth)
-const CACHE_KEY = 'abs4b_v2_cache';
+// Local cache keys are scoped per-course (curso_id) so switching between
+// courses never shows stale data from a different course while the real
+// fetch from Supabase is still in flight.
+function cacheKeyAbsences(){ return `abs4b_v2_cache_${_cursoActivo?_cursoActivo.id:'none'}`; }
+function cacheKeyHorario(){ return `abs4b_horario_cache_${_cursoActivo?_cursoActivo.id:'none'}`; }
 
-// absences is the in-memory source the rest of the app reads from.
-// Seed it from localStorage so the UI has something to show immediately,
-// then refresh from Supabase as soon as the network call resolves.
-let absences = JSON.parse(localStorage.getItem(CACHE_KEY) || '[]');
+// absences is the in-memory source the rest of the app reads from. It starts
+// empty and gets seeded from the per-course cache once a course is selected
+// (see selectCurso()), then refreshed from Supabase right after.
+let absences = [];
 
 function cacheAbsences(){
-  localStorage.setItem(CACHE_KEY, JSON.stringify(absences));
+  localStorage.setItem(cacheKeyAbsences(), JSON.stringify(absences));
+}
+
+function seedAbsencesFromCache(){
+  try {
+    absences = JSON.parse(localStorage.getItem(cacheKeyAbsences())||'[]');
+  } catch(err){ absences = []; }
 }
 
 // Map a Supabase row to the shape the rest of the app expects (it keys off `id`, `ts`, etc.)
@@ -1051,8 +1207,11 @@ function fromRow(row){
 
 async function loadAbsences(){
   if(!sb){ showToast('Sin conexión a la base — usando datos locales'); return; }
+  if(!_cursoActivo){ return; } // nothing to load before a course is selected
   try {
-    const {data, error} = await sb.from('ausencias').select('*').order('ts',{ascending:true});
+    const {data, error} = await sb.from('ausencias').select('*')
+      .eq('curso_id', _cursoActivo.id)
+      .order('ts',{ascending:true});
     if(error){
       console.error('Error cargando ausencias de Supabase:', error);
       showToast('Sin conexión — mostrando datos guardados localmente');
@@ -1069,24 +1228,23 @@ async function loadAbsences(){
 
 // Local cache for the schedule too, so the app paints something useful even
 // the first instant before Supabase responds (or if it's briefly offline).
-const HORARIO_CACHE_KEY = 'abs4b_horario_cache';
-
 function cacheHorario(modulosRows, clasesRows){
-  localStorage.setItem(HORARIO_CACHE_KEY, JSON.stringify({modulos:modulosRows, clases:clasesRows}));
+  localStorage.setItem(cacheKeyHorario(), JSON.stringify({modulos:modulosRows, clases:clasesRows}));
 }
 
 async function loadHorario(){
+  if(!_cursoActivo) return;
   // Seed from cache first so there's never a blank schedule on screen
   try {
-    const cached = JSON.parse(localStorage.getItem(HORARIO_CACHE_KEY)||'null');
+    const cached = JSON.parse(localStorage.getItem(cacheKeyHorario())||'null');
     if(cached) rebuildScheduleFrom(cached.modulos, cached.clases);
   } catch(err){ /* ignore corrupt cache */ }
 
   if(!sb) return;
   try {
     const [modRes, clasesRes] = await Promise.all([
-      sb.from('modulos').select('*').order('orden',{ascending:true}),
-      sb.from('clases').select('*'),
+      sb.from('modulos').select('*').eq('curso_id', _cursoActivo.id).order('orden',{ascending:true}),
+      sb.from('clases').select('*').eq('curso_id', _cursoActivo.id),
     ]);
     if(modRes.error || clasesRes.error){
       console.error('Error cargando horario de Supabase:', modRes.error||clasesRes.error);
@@ -1106,6 +1264,10 @@ async function loadHorario(){
 function subscribeRealtime(){
   if(!sb) return;
   try {
+    // Remove any channels from a previously active course before subscribing
+    // again — otherwise switching courses would stack duplicate listeners,
+    // each re-firing loadAbsences()/loadHorario() once per old course too.
+    sb.removeAllChannels();
     sb.channel('ausencias-changes')
       .on('postgres_changes', {event:'*', schema:'public', table:'ausencias'}, ()=>{
         loadAbsences();
@@ -1275,6 +1437,17 @@ function diaDate(weekStr, dia){
 
 function fmtDate(d){
   return d.toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit'});
+}
+
+// Safe filename fragment from the active course's name (no accents, spaces,
+// or special chars) — used for downloaded PDF/CSV filenames.
+function cursoSlug(){
+  const nombre = _cursoActivo ? _cursoActivo.nombre : 'curso';
+  return nombre
+    .toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'') // strip accents
+    .replace(/[^a-z0-9]+/g,'_')
+    .replace(/^_+|_+$/g,'') || 'curso';
 }
 
 function fmtDateFull(d){
@@ -1627,8 +1800,10 @@ function closeModal(){ document.getElementById('overlay').classList.remove('open
 let _reportPeriod = 'week'; // 'week' | 'month' | 'year'
 
 function openReportModal(){
-  // Pre-fill curso if it was filled before (kept in memory only, not persisted —
-  // there's no requirement to remember it across sessions, and it's one field)
+  // Pre-fill the curso field with the active course's name — the person can
+  // still edit it freely (e.g. for the official name used in school paperwork).
+  const repCurso = document.getElementById('repCurso');
+  if(!repCurso.value && _cursoActivo) repCurso.value = _cursoActivo.nombre;
   renderReportPreview();
   document.getElementById('reportOverlay').classList.add('open');
 }
@@ -1896,21 +2071,24 @@ async function saveScheduleEditor(){
     // are small (a school week) and have no foreign keys pointing OUT of them
     // that would break — "ausencias" references materia by name (text), not
     // by the row id, so deleting and re-inserting clases doesn't orphan anything.
+    // Every row is scoped to the active course, and the delete below is
+    // filtered by curso_id too — this must never touch other courses' rows.
     const modulosPayload = _draftModulos.map(m=>({
-      codigo:m.codigo.trim(), label:m.label.trim(), es_recreo:!!m.es_recreo,
+      curso_id:_cursoActivo.id, codigo:m.codigo.trim(), label:m.label.trim(), es_recreo:!!m.es_recreo,
       orden:_draftModulos.indexOf(m)+1,
     }));
     const clasesPayload = _draftClases.map(c=>({
-      dia:c.dia, modulo_codigo:c.modulo_codigo.trim(),
+      curso_id:_cursoActivo.id, dia:c.dia, modulo_codigo:c.modulo_codigo.trim(),
       materia:c.materia.trim(), docente:c.docente.trim(),
     }));
 
     // Clases reference modulos by codigo (FK), so clear clases first, then
     // replace modulos, then re-insert clases — avoids FK violations either way.
-    const delClases = await sb.from('clases').delete().neq('id',-1);
+    // Both deletes are scoped to the active course only.
+    const delClases = await sb.from('clases').delete().eq('curso_id', _cursoActivo.id);
     if(delClases.error) throw delClases.error;
 
-    const delModulos = await sb.from('modulos').delete().neq('id',-1);
+    const delModulos = await sb.from('modulos').delete().eq('curso_id', _cursoActivo.id);
     if(delModulos.error) throw delModulos.error;
 
     if(modulosPayload.length){
@@ -1951,7 +2129,7 @@ function generateReportPDF(){
 function buildReportPDF(){
   const establecimiento = document.getElementById('repEstablecimiento').value.trim() || 'Establecimiento educativo no especificado';
   const director = document.getElementById('repDirector').value.trim();
-  const curso = document.getElementById('repCurso').value.trim() || '4° B';
+  const curso = document.getElementById('repCurso').value.trim() || (_cursoActivo?_cursoActivo.nombre:'Curso no especificado');
   const presentadoPor = document.getElementById('repPresentadoPor').value.trim();
   const dni = document.getElementById('repDni').value.trim();
   const {label:periodLabel, absences:list} = getReportData();
@@ -2143,7 +2321,7 @@ function buildReportPDF(){
   const periodSlug = _reportPeriod==='week' ? `semana_${currentWeek().replace('-W','')}`
                     : _reportPeriod==='month' ? `mes_${today.getFullYear()}${String(today.getMonth()+1).padStart(2,'0')}`
                     : `anio_${today.getFullYear()}`;
-  doc.save(`informe_ausencias_4B_${periodSlug}.pdf`);
+  doc.save(`informe_ausencias_${cursoSlug()}_${periodSlug}.pdf`);
   closeReportModal();
   showToast('Informe PDF generado');
 }
@@ -2171,7 +2349,7 @@ async function saveAbsence(){
 
   try {
     const {data, error} = await sb.from('ausencias')
-      .insert({mid, dia, hora, week, obs, docente})
+      .insert({curso_id:_cursoActivo.id, mid, dia, hora, week, obs, docente})
       .select()
       .single();
 
@@ -2241,7 +2419,7 @@ function exportCSV(){
   });
   const csv='\uFEFF'+[hdr,...rows].join('\n');
   const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));
-  const el=document.createElement('a');el.href=url;el.download='ausencias_4B.csv';el.click();
+  const el=document.createElement('a');el.href=url;el.download=`ausencias_${cursoSlug()}.csv`;el.click();
   URL.revokeObjectURL(url);
 }
 
