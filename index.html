@@ -51,12 +51,69 @@ nav{
 .nav-s{font-size:10px;color:var(--t2);letter-spacing:.1em;text-transform:uppercase}
 .nav-r{display:flex;align-items:center;gap:8px}
 .nav-r label{font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:.08em}
-input[type=week]{
+/* WEEK PICKER (custom, replaces the native <input type=week> in the nav
+   so we can highlight weeks that contain absences — the native picker
+   doesn't allow styling individual dates). */
+.week-picker{position:relative}
+.week-btn{
   background:var(--s2);border:1px solid var(--border);border-radius:var(--r);
-  color:var(--text);padding:5px 10px;font-size:12px;font-family:inherit;outline:none;
+  color:var(--text);padding:5px 10px;font-size:12px;font-family:inherit;
+  display:flex;align-items:center;gap:8px;cursor:pointer;outline:none;
+  transition:border-color .15s;
 }
-input[type=week]:focus{border-color:var(--g)}
-input[type=week]::-webkit-calendar-picker-indicator{filter:invert(1) opacity(.4);cursor:pointer}
+.week-btn:hover,.week-btn.open{border-color:var(--g)}
+.week-btn svg{color:var(--t3);flex-shrink:0;transition:transform .15s}
+.week-btn.open svg{transform:rotate(180deg)}
+
+.week-pop{
+  position:absolute;top:calc(100% + 8px);right:0;z-index:100;
+  background:#15151a;border:1px solid var(--border);border-radius:8px;
+  padding:.9rem;width:280px;
+  box-shadow:0 16px 40px rgba(0,0,0,.6);
+  opacity:0;transform:translateY(-6px);pointer-events:none;
+  transition:opacity .15s,transform .15s;
+}
+.week-pop.open{opacity:1;transform:translateY(0);pointer-events:all}
+.wp-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:.7rem}
+.wp-month{font-size:12px;font-weight:700;letter-spacing:.04em;text-transform:capitalize}
+.wp-nav{display:flex;gap:4px}
+.wp-nav button{
+  width:22px;height:22px;border-radius:4px;border:none;background:var(--s3);
+  color:var(--t2);cursor:pointer;display:flex;align-items:center;justify-content:center;
+  transition:background .15s;font-size:11px;
+}
+.wp-nav button:hover{background:var(--s4);color:var(--text)}
+.wp-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;font-size:10px}
+.wp-dow{color:var(--t3);text-align:center;padding:3px 0;font-weight:700;text-transform:uppercase;font-size:9px}
+.wp-week-row{
+  display:contents;cursor:pointer;
+}
+.wp-day{
+  text-align:center;padding:5px 0;border-radius:3px;color:var(--t2);position:relative;
+  transition:background .12s;
+}
+.wp-week-row:hover .wp-day{background:var(--s3)}
+.wp-week-row.selected .wp-day{background:rgba(16,124,16,.28);color:var(--text)}
+.wp-week-row.current .wp-day{box-shadow:inset 0 0 0 1px var(--g)}
+.wp-day.dim{color:var(--t3);opacity:.4}
+.wp-day.has-absence::after{
+  content:'';position:absolute;bottom:1px;left:50%;transform:translateX(-50%);
+  width:4px;height:4px;border-radius:50%;background:var(--danger);
+}
+.wp-week-row.selected .wp-day.has-absence::after{background:var(--danger)}
+.wp-foot{
+  display:flex;justify-content:space-between;align-items:center;
+  margin-top:.8rem;padding-top:.7rem;border-top:1px solid var(--border);
+}
+.wp-link{
+  background:none;border:none;color:var(--t2);font-size:11px;font-family:inherit;
+  cursor:pointer;padding:0;transition:color .15s;
+}
+.wp-link:hover{color:var(--text)}
+.wp-link.accent{color:var(--gl);font-weight:700}
+.wp-link.accent:hover{color:var(--gn)}
+.wp-legend{display:flex;align-items:center;gap:5px;font-size:9px;color:var(--t3);margin-top:.6rem}
+.wp-legend .dot{width:5px;height:5px;border-radius:50%;background:var(--danger);flex-shrink:0}
 
 /* STATS */
 .stats{
@@ -394,7 +451,13 @@ textarea.fc{resize:none;height:60px}
   </div>
   <div class="nav-r">
     <label>Semana</label>
-    <input type="week" id="weekInput">
+    <div class="week-picker" id="weekPicker">
+      <button class="week-btn" id="weekBtn" type="button">
+        <span id="weekBtnLabel">Semana</span>
+        <svg width="10" height="6" viewBox="0 0 10 6" fill="none"><path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="week-pop" id="weekPop"></div>
+    </div>
   </div>
 </nav>
 
@@ -646,7 +709,124 @@ function getISOWeek(d){
   return dt.getFullYear()+'-W'+String(w).padStart(2,'0');
 }
 
-function currentWeek(){ return document.getElementById('weekInput').value || getISOWeek(); }
+// _selectedWeek holds the active week string ("YYYY-Www"), replacing the
+// native <input type=week> value as the source of truth for currentWeek().
+let _selectedWeek = getISOWeek();
+function currentWeek(){ return _selectedWeek; }
+
+// ── WEEK PICKER (custom) ─────────────────────────────────────────────────────
+// _popMonth tracks which calendar month the dropdown is currently showing —
+// independent from the selected week, so browsing months doesn't change the selection.
+let _popMonth = null; // {y, m} 0-indexed month
+
+function weekBtnLabel(ws){
+  const [y,w] = ws.split('-W');
+  return `Semana ${Number(w)}, ${y}`;
+}
+
+function updateWeekBtnLabel(){
+  document.getElementById('weekBtnLabel').textContent = weekBtnLabel(_selectedWeek);
+}
+
+function setSelectedWeek(ws){
+  _selectedWeek = ws;
+  updateWeekBtnLabel();
+  render();
+}
+
+function openWeekPop(){
+  const mon = weekToMonday(_selectedWeek);
+  _popMonth = {y:mon.getFullYear(), m:mon.getMonth()};
+  renderWeekPop();
+  document.getElementById('weekPop').classList.add('open');
+  document.getElementById('weekBtn').classList.add('open');
+}
+
+function closeWeekPop(){
+  document.getElementById('weekPop').classList.remove('open');
+  document.getElementById('weekBtn').classList.remove('open');
+}
+
+function toggleWeekPop(){
+  const isOpen = document.getElementById('weekPop').classList.contains('open');
+  isOpen ? closeWeekPop() : openWeekPop();
+}
+
+function shiftPopMonth(delta){
+  let {y,m} = _popMonth;
+  m += delta;
+  if(m<0){m=11;y--;} else if(m>11){m=0;y++;}
+  _popMonth = {y,m};
+  renderWeekPop();
+}
+
+const MES_NOMBRES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+
+function renderWeekPop(){
+  const {y,m} = _popMonth;
+  const pop = document.getElementById('weekPop');
+
+  // Build the set of week-strings that contain at least one absence, for the dot indicator
+  const weeksWithAbsences = new Set(absences.map(a=>a.week));
+
+  // First day of the displayed month, walked back to the Monday on/before it
+  const first = new Date(y,m,1);
+  const gridStart = new Date(first);
+  const back = (first.getDay()+6)%7; // days since Monday
+  gridStart.setDate(first.getDate()-back);
+
+  // Build 6 week-rows (covers any month layout)
+  let rowsHtml = '';
+  for(let r=0;r<6;r++){
+    const rowStart = new Date(gridStart);
+    rowStart.setDate(gridStart.getDate()+r*7);
+    const ws = getISOWeek(rowStart);
+    const isSelected = ws===_selectedWeek;
+    const isCurrent = ws===getISOWeek();
+    const hasAbs = weeksWithAbsences.has(ws);
+
+    let daysHtml='';
+    for(let d=0;d<7;d++){
+      const day = new Date(rowStart);
+      day.setDate(rowStart.getDate()+d);
+      const dim = day.getMonth()!==m;
+      daysHtml += `<div class="wp-day ${dim?'dim':''}">${day.getDate()}</div>`;
+    }
+
+    rowsHtml += `<div class="wp-week-row ${isSelected?'selected':''} ${isCurrent?'current':''}" data-week="${ws}">
+      ${daysHtml}
+    </div>`;
+  }
+
+  pop.innerHTML = `
+    <div class="wp-head">
+      <div class="wp-month">${MES_NOMBRES[m]} de ${y}</div>
+      <div class="wp-nav">
+        <button type="button" data-nav="-1">‹</button>
+        <button type="button" data-nav="1">›</button>
+      </div>
+    </div>
+    <div class="wp-grid">
+      <div class="wp-dow">L</div><div class="wp-dow">M</div><div class="wp-dow">X</div>
+      <div class="wp-dow">J</div><div class="wp-dow">V</div><div class="wp-dow">S</div><div class="wp-dow">D</div>
+      ${rowsHtml}
+    </div>
+    <div class="wp-legend"><span class="dot"></span> Semana con ausencias registradas</div>
+    <div class="wp-foot">
+      <button class="wp-link" type="button" data-action="clear-week">Borrar</button>
+      <button class="wp-link accent" type="button" data-action="this-week">Esta semana</button>
+    </div>
+  `;
+
+  // Second pass: mark the has-absence dot on each row's days (one dot is enough,
+  // placed on the first day cell of the row for a clean look)
+  pop.querySelectorAll('.wp-week-row').forEach(row=>{
+    const ws = row.dataset.week;
+    if(weeksWithAbsences.has(ws)){
+      row.querySelector('.wp-day')?.classList.add('has-absence');
+    }
+  });
+}
 
 // Today's day index 0=Mon..4=Fri, null if weekend
 function todayDia(){
@@ -856,6 +1036,11 @@ function render(){
       <button class="hi-del" onclick="deleteAbs(${a.id})" title="Eliminar">✕</button>
     </div>`;
   }).join('');
+
+  // Keep the week-picker dots in sync if it's open while data changes
+  // (e.g. another device adds an absence via realtime)
+  const wpop = document.getElementById('weekPop');
+  if(wpop && wpop.classList.contains('open')) renderWeekPop();
 }
 
 // ── MODAL ────────────────────────────────────────────────────────────────────
@@ -1030,10 +1215,33 @@ document.getElementById('calBody').addEventListener('click', e=>{
   }
 });
 
+// ── WEEK PICKER event wiring ─────────────────────────────────────────────────
+document.getElementById('weekBtn').addEventListener('click', e=>{
+  e.stopPropagation();
+  toggleWeekPop();
+});
+
+document.getElementById('weekPop').addEventListener('click', e=>{
+  const navBtn = e.target.closest('[data-nav]');
+  if(navBtn){ shiftPopMonth(Number(navBtn.dataset.nav)); return; }
+
+  const clearBtn = e.target.closest('[data-action="clear-week"]');
+  if(clearBtn){ setSelectedWeek(getISOWeek()); closeWeekPop(); return; }
+
+  const thisWeekBtn = e.target.closest('[data-action="this-week"]');
+  if(thisWeekBtn){ setSelectedWeek(getISOWeek()); closeWeekPop(); return; }
+
+  const row = e.target.closest('.wp-week-row');
+  if(row){ setSelectedWeek(row.dataset.week); closeWeekPop(); }
+});
+
+// Close the popover when clicking anywhere outside it
+document.addEventListener('click', e=>{
+  if(!e.target.closest('#weekPicker')) closeWeekPop();
+});
+
 // Init
-const wi=document.getElementById('weekInput');
-wi.value=getISOWeek();
-wi.addEventListener('change',render);
+updateWeekBtnLabel();
 render();           // instant paint using whatever was cached locally
 loadAbsences();      // then refresh with the real data from Supabase
 subscribeRealtime(); // and stay in sync if it changes from another device
