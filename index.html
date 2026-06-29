@@ -414,6 +414,50 @@ textarea.fc{resize:none;height:60px}
 .rep-preview b{color:var(--text)}
 .rep-preview .rep-warn{color:var(--warn);margin-top:4px;display:block}
 
+/* SCHEDULE EDITOR */
+.modal-xwide{width:min(640px,94vw);max-height:88vh;display:flex;flex-direction:column}
+.modal-xwide .m-actions{flex-shrink:0}
+#schedTabMaterias,#schedTabModulos{overflow-y:auto;flex:1;min-height:0}
+.sched-list{display:flex;flex-direction:column;gap:10px;max-height:50vh;overflow-y:auto;padding-right:4px;margin-bottom:.8rem}
+
+.mat-group{
+  background:var(--s1);border:1px solid var(--border);border-radius:6px;padding:10px 12px;
+}
+.mat-group-head{display:flex;gap:8px;align-items:center;margin-bottom:8px}
+.mat-group-head input{flex:1}
+.mat-input{
+  background:var(--s3);border:1px solid var(--border);border-radius:var(--r);
+  color:var(--text);font-family:inherit;font-size:12px;padding:6px 9px;outline:none;
+  transition:border-color .15s;
+}
+.mat-input:focus{border-color:var(--g)}
+.mat-input.mat-name{font-weight:700}
+.btn-icon{
+  width:26px;height:26px;border-radius:var(--r);border:1px solid var(--border);
+  background:none;color:var(--t3);cursor:pointer;display:flex;align-items:center;justify-content:center;
+  font-size:12px;flex-shrink:0;transition:all .15s;
+}
+.btn-icon:hover{border-color:var(--danger);color:var(--danger)}
+.btn-icon.add:hover{border-color:var(--gl);color:var(--gl)}
+
+.clase-row{
+  display:grid;grid-template-columns:90px 1fr 26px;gap:6px;align-items:center;margin-top:6px;
+}
+.clase-row select.mat-input{appearance:none}
+
+.btn-add-row{
+  width:100%;background:none;border:1px dashed var(--border);border-radius:var(--r);
+  color:var(--t2);font-family:inherit;font-size:11px;font-weight:700;letter-spacing:.04em;
+  padding:9px;cursor:pointer;transition:all .15s;text-transform:uppercase;
+}
+.btn-add-row:hover{border-color:var(--gl);color:var(--gl);border-style:solid}
+
+.mod-row{
+  display:grid;grid-template-columns:90px 1fr 90px 26px;gap:6px;align-items:center;
+  background:var(--s1);border:1px solid var(--border);border-radius:6px;padding:8px 10px;
+}
+.mod-row label{font-size:9px;color:var(--t3);text-transform:uppercase;display:flex;align-items:center;gap:4px;white-space:nowrap}
+
 /* TOAST */
 .toast{
   position:fixed;bottom:1.2rem;right:1.2rem;z-index:300;
@@ -513,6 +557,7 @@ textarea.fc{resize:none;height:60px}
 <div class="cal-header">
   <div class="sec-title">Horario semanal</div>
   <div style="display:flex;gap:7px;align-items:center">
+    <button class="btn-exp" onclick="openScheduleEditor()">✎ Editar horario</button>
     <button class="btn-exp" onclick="exportCSV()">↓ CSV</button>
     <button class="btn-exp" onclick="openReportModal()">▤ Informe PDF</button>
     <button class="btn-add" onclick="openModal()">+ Registrar ausencia</button>
@@ -621,87 +666,85 @@ textarea.fc{resize:none;height:60px}
   </div>
 </div>
 
+<!-- SCHEDULE EDITOR MODAL -->
+<div class="overlay" id="schedOverlay">
+  <div class="modal modal-xwide">
+    <div class="m-head">
+      <div class="m-icon">✎</div>
+      <div class="m-title">Editar horario</div>
+    </div>
+
+    <div class="period-tabs" id="schedTabs" style="margin-bottom:1rem">
+      <button type="button" class="period-tab active" data-schedtab="materias">Materias y clases</button>
+      <button type="button" class="period-tab" data-schedtab="modulos">Módulos horarios</button>
+    </div>
+
+    <!-- Materias tab -->
+    <div id="schedTabMaterias">
+      <div class="sched-list" id="schedMatList"></div>
+      <button class="btn-add-row" type="button" onclick="addClaseRow()">+ Agregar clase</button>
+    </div>
+
+    <!-- Módulos tab -->
+    <div id="schedTabModulos" style="display:none">
+      <div class="sched-list" id="schedModList"></div>
+      <button class="btn-add-row" type="button" onclick="addModuloRow()">+ Agregar módulo</button>
+    </div>
+
+    <div class="m-actions">
+      <button class="btn-cancel" onclick="closeScheduleEditor()">Cerrar</button>
+      <button class="btn-save" onclick="saveScheduleEditor()">Guardar cambios</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"><div class="tdot"></div><span id="toastMsg"></span></div>
 
 <script>
-// ── HORARIO BASE ─────────────────────────────────────────────────────────────
-// Cada slot: { hora, label, mid, dias[] }
-// La tabla original de 4B
+// ── HORARIO (dinámico) ───────────────────────────────────────────────────────
+// HORAS, SCHEDULE y MATERIAS ya NO son constantes fijas: se cargan desde
+// Supabase (tablas "modulos" y "clases") al iniciar la app, y se reconstruyen
+// cada vez que el usuario edita algo desde el panel "Editar horario".
+//
+// El nombre de la materia (no un código corto) es la clave que vincula una
+// clase con sus ausencias registradas — así, si el usuario le cambia el
+// nombre a una materia, lo más simple es que las ausencias viejas se sigan
+// viendo bajo el nombre anterior hasta que el usuario las edite, en vez de
+// quedar huérfanas. El campo se sigue llamando `mid` internamente (heredado
+// del diseño original) para no tener que tocar el resto de la app, pero hoy
+// contiene el nombre completo de la materia, no un código.
 
-const HORAS = [
-  { h:'1', label:'7:20 - 8:20' },
-  { h:'2', label:'8:20 - 9:20' },
-  { h:'recreo1', label:'RECREO  9:20 - 9:35', recreo:true },
-  { h:'3', label:'9:30 - 10:30' },
-  { h:'4', label:'10:30 - 11:30' },
-  { h:'recreo2', label:'RECREO  11:30 - 11:40', recreo:true },
-  { h:'5', label:'11:40 - 12:40' },
-  { h:'recreo3', label:'RECREO  12:40 - 12:50', recreo:true },
-  { h:'6', label:'12:50 - 13:50' },
-  { h:'ef', label:'Ed. Física  14:50 - 15:50' },
-];
-
-// HORARIO: dia → hora → {mid, nombre, docente}
-// Tomado exactamente de la imagen
-const SCHEDULE = {
-  LU: {
-    '1':  {mid:'historia', nombre:'Historia',       docente:'Sperduti'},
-    '2':  {mid:'historia', nombre:'Historia',       docente:'Sperduti'},
-    '3':  {mid:'relig',    nombre:'For. Religiosa', docente:'Emanuel Pezoa'},
-    '4':  {mid:'relig',    nombre:'For. Religiosa', docente:'Emanuel Pezoa'},
-    'ef': {mid:'edfisica', nombre:'Educ. Física',   docente:'Lucas'},
-  },
-  MA: {
-    '1':  {mid:'quimica',  nombre:'Química',        docente:'Abigail Sosa'},
-    '2':  {mid:'quimica',  nombre:'Química',        docente:'Abigail Sosa'},
-    '3':  {mid:'bio',      nombre:'Biología',       docente:'Boni-Plaza'},
-    '4':  {mid:'ingles2',  nombre:'Inglés',         docente:'Lindon y Cejas'},
-  },
-  MI: {
-    '1':  {mid:'geo',    nombre:'Geografía',  docente:'Ferrari'},
-    '2':  {mid:'geo',    nombre:'Geografía',  docente:'Ferrari'},
-    '3':  {mid:'lit',    nombre:'Literatura', docente:'Fernández'},
-    '4':  {mid:'fisica', nombre:'Física',     docente:'Pérez'},
-    '5':  {mid:'fisica', nombre:'Física',     docente:'Pérez'},
-  },
-  JU: {
-    '1':  {mid:'matem',  nombre:'Matemática',     docente:'Acedo'},
-    '2':  {mid:'bio',    nombre:'Biología',       docente:'Boni-Plaza (MI)'},
-    '3':  {mid:'salud',  nombre:'Salud y Adoles.',docente:'Jessica Stanicio'},
-    '4':  {mid:'salud',  nombre:'Salud y Adoles.',docente:'Jessica Stanicio'},
-    '5':  {mid:'matem',  nombre:'Matemática',     docente:'Acedo'},
-    '6':  {mid:'matem',  nombre:'Matemática',     docente:'Acedo'},
-    'ef': {mid:'edfisica',nombre:'Educ. Física',  docente:'Lucas'},
-  },
-  VI: {
-    '1':  {mid:'ingles', nombre:'Inglés',     docente:'Benseñy'},
-    '2':  {mid:'ingles', nombre:'Inglés',     docente:'Benseñy'},
-    '3':  {mid:'lit',    nombre:'Literatura', docente:'Fernández'},
-    '4':  {mid:'lit',    nombre:'Literatura', docente:'Fernández'},
-    '5':  {mid:'nticx',  nombre:'NTICx',      docente:'De la Cal'},
-    '6':  {mid:'nticx',  nombre:'NTICx',      docente:'De la Cal'},
-  },
-};
+let HORAS = [];      // [{h, label, recreo?}]
+let SCHEDULE = {};   // dia -> hora -> {mid, nombre, docente}
+let MATERIAS = [];   // [{id, nombre, docente}] — derivado de SCHEDULE
 
 const DIAS = ['LU','MA','MI','JU','VI'];
 const DIA_FULL = {LU:'Lunes',MA:'Martes',MI:'Miércoles',JU:'Jueves',VI:'Viernes'};
 
-// Materia catalog for modal
-const MATERIAS = [
-  {id:'historia', nombre:'Historia',          docente:'Sperduti'},
-  {id:'quimica',  nombre:'Química',           docente:'Abigail Sosa'},
-  {id:'geo',      nombre:'Geografía',         docente:'Ferrari'},
-  {id:'matem',    nombre:'Matemática',        docente:'Acedo'},
-  {id:'ingles',   nombre:'Inglés',            docente:'Benseñy'},
-  {id:'relig',    nombre:'For. Religiosa',    docente:'Emanuel Pezoa'},
-  {id:'bio',      nombre:'Biología',          docente:'Boni-Plaza'},
-  {id:'lit',      nombre:'Literatura',        docente:'Fernández'},
-  {id:'salud',    nombre:'Salud y Adoles.',   docente:'Jessica Stanicio'},
-  {id:'fisica',   nombre:'Física',            docente:'Pérez'},
-  {id:'nticx',    nombre:'NTICx',             docente:'De la Cal'},
-  {id:'edfisica', nombre:'Educ. Física',      docente:'Lucas'},
-  {id:'ingles2',  nombre:'Inglés (Lindon)',   docente:'Lindon y Cejas'},
-];
+// Rebuilds SCHEDULE and MATERIAS from flat arrays of "modulos" and "clases" rows
+// (either freshly fetched from Supabase, or the in-memory copies after a local edit).
+function rebuildScheduleFrom(modulosRows, clasesRows){
+  HORAS = [...modulosRows]
+    .sort((a,b)=>a.orden-b.orden)
+    .map(m=>({h:m.codigo, label:m.label, recreo:m.es_recreo}));
+
+  const sched = {};
+  DIAS.forEach(d=>sched[d]={});
+  clasesRows.forEach(c=>{
+    if(!sched[c.dia]) sched[c.dia]={};
+    sched[c.dia][c.modulo_codigo] = {mid:c.materia, nombre:c.materia, docente:c.docente||''};
+  });
+  SCHEDULE = sched;
+
+  // Derive the materia catalog: one entry per unique materia name,
+  // using the first docente found for it as the "representative" one
+  // (shown in dropdowns; a materia can have different docentes on different days).
+  const byName = {};
+  clasesRows.forEach(c=>{
+    if(!byName[c.materia]) byName[c.materia] = {id:c.materia, nombre:c.materia, docente:c.docente||''};
+  });
+  MATERIAS = Object.values(byName).sort((a,b)=>a.nombre.localeCompare(b.nombre,'es'));
+}
 
 // ── SUPABASE ─────────────────────────────────────────────────────────────────
 const SUPABASE_URL = 'https://axxmgcfeufbiaxirpvoo.supabase.co';
@@ -757,6 +800,41 @@ async function loadAbsences(){
   }
 }
 
+// Local cache for the schedule too, so the app paints something useful even
+// the first instant before Supabase responds (or if it's briefly offline).
+const HORARIO_CACHE_KEY = 'abs4b_horario_cache';
+
+function cacheHorario(modulosRows, clasesRows){
+  localStorage.setItem(HORARIO_CACHE_KEY, JSON.stringify({modulos:modulosRows, clases:clasesRows}));
+}
+
+async function loadHorario(){
+  // Seed from cache first so there's never a blank schedule on screen
+  try {
+    const cached = JSON.parse(localStorage.getItem(HORARIO_CACHE_KEY)||'null');
+    if(cached) rebuildScheduleFrom(cached.modulos, cached.clases);
+  } catch(err){ /* ignore corrupt cache */ }
+
+  if(!sb) return;
+  try {
+    const [modRes, clasesRes] = await Promise.all([
+      sb.from('modulos').select('*').order('orden',{ascending:true}),
+      sb.from('clases').select('*'),
+    ]);
+    if(modRes.error || clasesRes.error){
+      console.error('Error cargando horario de Supabase:', modRes.error||clasesRes.error);
+      showToast('Sin conexión — mostrando el horario guardado localmente');
+      return;
+    }
+    rebuildScheduleFrom(modRes.data, clasesRes.data);
+    cacheHorario(modRes.data, clasesRes.data);
+    render();
+  } catch(err){
+    console.error('Excepción cargando horario:', err);
+    showToast('Sin conexión — mostrando el horario guardado localmente');
+  }
+}
+
 // Live sync: if the data changes from another device/tab, reflect it here automatically.
 function subscribeRealtime(){
   if(!sb) return;
@@ -765,6 +843,10 @@ function subscribeRealtime(){
       .on('postgres_changes', {event:'*', schema:'public', table:'ausencias'}, ()=>{
         loadAbsences();
       })
+      .subscribe();
+    sb.channel('horario-changes')
+      .on('postgres_changes', {event:'*', schema:'public', table:'modulos'}, ()=>{ loadHorario(); })
+      .on('postgres_changes', {event:'*', schema:'public', table:'clases'}, ()=>{ loadHorario(); })
       .subscribe();
   } catch(err){
     console.error('No se pudo suscribir a realtime:', err);
@@ -948,11 +1030,13 @@ function toggleBreakdown(){
 
 // ── TOTAL HOURS PER MATERIA ──────────────────────────────────────────────────
 function totalSlots(){
-  // Count all slots in SCHEDULE per mid, plus a grand total
+  // Count all slots in SCHEDULE per mid, plus a grand total.
+  // Guarded against SCHEDULE being empty/incomplete (e.g. the very first paint
+  // before loadHorario() has populated anything, on a brand-new device with no cache).
   const t={};
   let total=0;
   DIAS.forEach(d=>{
-    Object.values(SCHEDULE[d]).forEach(s=>{
+    Object.values(SCHEDULE[d]||{}).forEach(s=>{
       t[s.mid]=(t[s.mid]||0)+1;
       total++;
     });
@@ -1142,7 +1226,7 @@ function onMateriaChange(){
   const mid=document.getElementById('mSel').value;
   const diasAvail=[];
   DIAS.forEach(d=>{
-    const inSched=Object.entries(SCHEDULE[d]).some(([h,s])=>s.mid===mid);
+    const inSched=Object.entries(SCHEDULE[d]||{}).some(([h,s])=>s.mid===mid);
     if(inSched) diasAvail.push(d);
   });
   const dsel=document.getElementById('diaSel');
@@ -1245,6 +1329,248 @@ function renderReportPreview(){
 document.getElementById('periodTabs').addEventListener('click', e=>{
   const btn = e.target.closest('.period-tab');
   if(btn) setReportPeriod(btn.dataset.period);
+});
+
+// ── EDITOR DE HORARIO ────────────────────────────────────────────────────────
+// Works on a local "draft" copy so the user can make several changes and only
+// touch the database once, when they hit "Guardar cambios". Each draft row
+// keeps its original Supabase `id` (so we know whether to update or insert)
+// plus a temporary local `_tmpId` for brand-new rows that don't have one yet.
+let _draftClases = [];   // [{_tmpId, id?, dia, modulo_codigo, materia, docente}]
+let _draftModulos = [];  // [{_tmpId, id?, codigo, label, es_recreo, orden}]
+let _tmpIdCounter = 1;
+
+function openScheduleEditor(){
+  // Snapshot the current schedule into editable rows
+  _draftClases = [];
+  DIAS.forEach(d=>{
+    Object.entries(SCHEDULE[d]||{}).forEach(([modulo_codigo, slot])=>{
+      _draftClases.push({_tmpId:_tmpIdCounter++, dia:d, modulo_codigo, materia:slot.nombre, docente:slot.docente});
+    });
+  });
+  _draftModulos = HORAS.map(h=>({_tmpId:_tmpIdCounter++, codigo:h.h, label:h.label, es_recreo:!!h.recreo}));
+
+  setSchedTab('materias');
+  renderSchedMateriasTab();
+  renderSchedModulosTab();
+  document.getElementById('schedOverlay').classList.add('open');
+}
+
+function closeScheduleEditor(){
+  document.getElementById('schedOverlay').classList.remove('open');
+}
+
+function setSchedTab(tab){
+  document.querySelectorAll('[data-schedtab]').forEach(btn=>{
+    btn.classList.toggle('active', btn.dataset.schedtab===tab);
+  });
+  document.getElementById('schedTabMaterias').style.display = tab==='materias' ? '' : 'none';
+  document.getElementById('schedTabModulos').style.display  = tab==='modulos'  ? '' : 'none';
+}
+
+document.getElementById('schedTabs').addEventListener('click', e=>{
+  const btn = e.target.closest('[data-schedtab]');
+  if(btn) setSchedTab(btn.dataset.schedtab);
+});
+
+// ── Materias tab ──────────────────────────────────────────────────────────
+function renderSchedMateriasTab(){
+  const list = document.getElementById('schedMatList');
+  // Group draft clases by materia name
+  const groups = {};
+  _draftClases.forEach(c=>{
+    if(!groups[c.materia]) groups[c.materia]=[];
+    groups[c.materia].push(c);
+  });
+  const names = Object.keys(groups).sort((a,b)=>a.localeCompare(b,'es'));
+
+  if(!names.length){
+    list.innerHTML = '<div class="empty">No hay materias cargadas. Usá "+ Agregar clase" para empezar.</div>';
+    return;
+  }
+
+  list.innerHTML = names.map(name=>{
+    const rows = groups[name];
+    const rowsHtml = rows.map(c=>`
+      <div class="clase-row" data-tmpid="${c._tmpId}">
+        <select class="mat-input sched-dia" data-tmpid="${c._tmpId}">
+          ${DIAS.map(d=>`<option value="${d}" ${d===c.dia?'selected':''}>${DIA_FULL[d]}</option>`).join('')}
+        </select>
+        <select class="mat-input sched-modulo" data-tmpid="${c._tmpId}">
+          ${_draftModulos.filter(m=>!m.es_recreo).map(m=>`<option value="${m.codigo}" ${m.codigo===c.modulo_codigo?'selected':''}>${m.label}</option>`).join('')}
+        </select>
+        <button class="btn-icon" type="button" data-action="del-clase" data-tmpid="${c._tmpId}" title="Quitar esta clase">✕</button>
+      </div>
+    `).join('');
+
+    return `<div class="mat-group" data-materia="${name.replace(/"/g,'&quot;')}">
+      <div class="mat-group-head">
+        <input class="mat-input mat-name" data-field="materia" data-materia="${name.replace(/"/g,'&quot;')}" value="${name}" placeholder="Nombre de la materia">
+        <input class="mat-input" data-field="docente" data-materia="${name.replace(/"/g,'&quot;')}" value="${rows[0].docente||''}" placeholder="Docente">
+      </div>
+      ${rowsHtml}
+    </div>`;
+  }).join('');
+}
+
+function addClaseRow(){
+  const firstModulo = _draftModulos.find(m=>!m.es_recreo);
+  if(!firstModulo){
+    showToast('Primero agregá al menos un módulo horario');
+    return;
+  }
+  _draftClases.push({
+    _tmpId:_tmpIdCounter++, dia:'LU', modulo_codigo:firstModulo.codigo,
+    materia:'Nueva materia', docente:'',
+  });
+  renderSchedMateriasTab();
+}
+
+// Delegated events for the "materias" tab: text edits, día/módulo selects, delete
+document.getElementById('schedMatList').addEventListener('input', e=>{
+  const field = e.target.dataset.field;
+  if(field){
+    // Renaming a materia/docente applies to ALL its rows at once
+    const materiaKey = e.target.dataset.materia;
+    _draftClases.forEach(c=>{
+      if(c.materia===materiaKey) c[field] = e.target.value;
+    });
+    // Keep the dataset key in sync so subsequent edits on the same group still match
+    if(field==='materia'){
+      document.querySelectorAll(`[data-materia]`).forEach(el=>{
+        if(el.dataset.materia===materiaKey) el.dataset.materia = e.target.value;
+      });
+    }
+    return;
+  }
+  if(e.target.classList.contains('sched-dia')){
+    const row = _draftClases.find(c=>c._tmpId===Number(e.target.dataset.tmpid));
+    if(row) row.dia = e.target.value;
+  }
+  if(e.target.classList.contains('sched-modulo')){
+    const row = _draftClases.find(c=>c._tmpId===Number(e.target.dataset.tmpid));
+    if(row) row.modulo_codigo = e.target.value;
+  }
+});
+
+document.getElementById('schedMatList').addEventListener('click', e=>{
+  const delBtn = e.target.closest('[data-action="del-clase"]');
+  if(delBtn){
+    _draftClases = _draftClases.filter(c=>c._tmpId!==Number(delBtn.dataset.tmpid));
+    renderSchedMateriasTab();
+  }
+});
+
+// ── Módulos tab ───────────────────────────────────────────────────────────
+function renderSchedModulosTab(){
+  const list = document.getElementById('schedModList');
+  if(!_draftModulos.length){
+    list.innerHTML = '<div class="empty">No hay módulos cargados.</div>';
+    return;
+  }
+  list.innerHTML = _draftModulos.map(m=>`
+    <div class="mod-row" data-tmpid="${m._tmpId}">
+      <input class="mat-input" data-field="codigo" data-tmpid="${m._tmpId}" value="${m.codigo}" placeholder="código">
+      <input class="mat-input" data-field="label" data-tmpid="${m._tmpId}" value="${m.label}" placeholder="ej: 7:20 - 8:20">
+      <label><input type="checkbox" data-field="es_recreo" data-tmpid="${m._tmpId}" ${m.es_recreo?'checked':''}> Recreo</label>
+      <button class="btn-icon" type="button" data-action="del-modulo" data-tmpid="${m._tmpId}" title="Quitar módulo">✕</button>
+    </div>
+  `).join('');
+}
+
+function addModuloRow(){
+  _draftModulos.push({_tmpId:_tmpIdCounter++, codigo:`h${_draftModulos.length+1}`, label:'Nuevo módulo', es_recreo:false});
+  renderSchedModulosTab();
+}
+
+document.getElementById('schedModList').addEventListener('input', e=>{
+  const row = _draftModulos.find(m=>m._tmpId===Number(e.target.dataset.tmpid));
+  if(!row) return;
+  const field = e.target.dataset.field;
+  if(field==='es_recreo') row.es_recreo = e.target.checked;
+  else if(field) row[field] = e.target.value;
+});
+
+document.getElementById('schedModList').addEventListener('click', e=>{
+  const delBtn = e.target.closest('[data-action="del-modulo"]');
+  if(delBtn){
+    const tmpId = Number(delBtn.dataset.tmpid);
+    const removed = _draftModulos.find(m=>m._tmpId===tmpId);
+    _draftModulos = _draftModulos.filter(m=>m._tmpId!==tmpId);
+    // Also drop any clases that were sitting in the módulo we just removed,
+    // otherwise they'd point to a módulo_codigo that no longer exists.
+    if(removed) _draftClases = _draftClases.filter(c=>c.modulo_codigo!==removed.codigo);
+    renderSchedModulosTab();
+    renderSchedMateriasTab();
+  }
+});
+
+async function saveScheduleEditor(){
+  if(!sb){
+    showToast('Sin conexión a la base — no se pudo guardar el horario');
+    return;
+  }
+
+  // Basic validation before touching the database
+  const codigos = _draftModulos.map(m=>m.codigo.trim());
+  if(codigos.some(c=>!c)){
+    showToast('Todos los módulos necesitan un código'); return;
+  }
+  if(new Set(codigos).size !== codigos.length){
+    showToast('Hay códigos de módulo repetidos — deben ser únicos'); return;
+  }
+  if(_draftClases.some(c=>!c.materia.trim())){
+    showToast('Hay una materia sin nombre'); return;
+  }
+  // No two clases on the same día+módulo (mirrors the DB unique constraint)
+  const slotKeys = _draftClases.map(c=>`${c.dia}|${c.modulo_codigo}`);
+  if(new Set(slotKeys).size !== slotKeys.length){
+    showToast('Hay dos clases en el mismo día y módulo — revisá los horarios'); return;
+  }
+
+  try {
+    // Replace-all strategy: simplest way to keep modulos/clases in sync with
+    // the draft without diffing row-by-row. Safe here because these tables
+    // are small (a school week) and have no foreign keys pointing OUT of them
+    // that would break — "ausencias" references materia by name (text), not
+    // by the row id, so deleting and re-inserting clases doesn't orphan anything.
+    const modulosPayload = _draftModulos.map(m=>({
+      codigo:m.codigo.trim(), label:m.label.trim(), es_recreo:!!m.es_recreo,
+      orden:_draftModulos.indexOf(m)+1,
+    }));
+    const clasesPayload = _draftClases.map(c=>({
+      dia:c.dia, modulo_codigo:c.modulo_codigo.trim(),
+      materia:c.materia.trim(), docente:c.docente.trim(),
+    }));
+
+    // Clases reference modulos by codigo (FK), so clear clases first, then
+    // replace modulos, then re-insert clases — avoids FK violations either way.
+    const delClases = await sb.from('clases').delete().neq('id',-1);
+    if(delClases.error) throw delClases.error;
+
+    const delModulos = await sb.from('modulos').delete().neq('id',-1);
+    if(delModulos.error) throw delModulos.error;
+
+    if(modulosPayload.length){
+      const insMod = await sb.from('modulos').insert(modulosPayload);
+      if(insMod.error) throw insMod.error;
+    }
+    if(clasesPayload.length){
+      const insClases = await sb.from('clases').insert(clasesPayload);
+      if(insClases.error) throw insClases.error;
+    }
+
+    await loadHorario();
+    closeScheduleEditor();
+    showToast('Horario actualizado');
+  } catch(err){
+    console.error('Error guardando el horario:', err);
+    showToast('No se pudo guardar el horario — revisá tu conexión');
+  }
+}
+
+document.getElementById('schedOverlay').addEventListener('click', e=>{
+  if(e.target===e.currentTarget) closeScheduleEditor();
 });
 
 function generateReportPDF(){
@@ -1608,9 +1934,10 @@ document.addEventListener('click', e=>{
 
 // Init
 updateWeekBtnLabel();
-render();           // instant paint using whatever was cached locally
-loadAbsences();      // then refresh with the real data from Supabase
-subscribeRealtime(); // and stay in sync if it changes from another device
+loadHorario();        // seeds from local cache synchronously-ish, then refreshes from Supabase
+render();             // instant paint using whatever was cached locally
+loadAbsences();       // then refresh with the real data from Supabase
+subscribeRealtime();  // and stay in sync if it changes from another device
 </script>
 </body>
 </html>
