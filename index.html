@@ -571,7 +571,20 @@ const MATERIAS = [
 // ── SUPABASE ─────────────────────────────────────────────────────────────────
 const SUPABASE_URL = 'https://axxmgcfeufbiaxirpvoo.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF4eG1nY2ZldWZiaWF4aXJwdm9vIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI3MTk5NTksImV4cCI6MjA5ODI5NTk1OX0.5DzpY8uhrbhDKrubHcEaGWXgOfMBuOU6cB3X5DbQm9A';
-const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// Guard against the supabase-js CDN failing to load (slow network, blocked CDN, etc).
+// Without this guard, an exception here would stop the ENTIRE script from running —
+// including the click listeners for the calendar — leaving the UI looking "frozen".
+let sb = null;
+try {
+  if (window.supabase) {
+    sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  } else {
+    console.error('supabase-js no se cargó (CDN bloqueado o sin conexión). La app funcionará solo con el caché local.');
+  }
+} catch(err) {
+  console.error('No se pudo inicializar el cliente de Supabase:', err);
+}
 
 // Local cache key (used as instant-load fallback / offline backup, NOT source of truth)
 const CACHE_KEY = 'abs4b_v2_cache';
@@ -592,24 +605,35 @@ function fromRow(row){
 }
 
 async function loadAbsences(){
-  const {data, error} = await sb.from('ausencias').select('*').order('ts',{ascending:true});
-  if(error){
-    console.error('Error cargando ausencias de Supabase:', error);
+  if(!sb){ showToast('Sin conexión a la base — usando datos locales'); return; }
+  try {
+    const {data, error} = await sb.from('ausencias').select('*').order('ts',{ascending:true});
+    if(error){
+      console.error('Error cargando ausencias de Supabase:', error);
+      showToast('Sin conexión — mostrando datos guardados localmente');
+      return; // keep whatever was in the local cache
+    }
+    absences = data.map(fromRow);
+    cacheAbsences();
+    render();
+  } catch(err){
+    console.error('Excepción cargando ausencias:', err);
     showToast('Sin conexión — mostrando datos guardados localmente');
-    return; // keep whatever was in the local cache
   }
-  absences = data.map(fromRow);
-  cacheAbsences();
-  render();
 }
 
 // Live sync: if the data changes from another device/tab, reflect it here automatically.
 function subscribeRealtime(){
-  sb.channel('ausencias-changes')
-    .on('postgres_changes', {event:'*', schema:'public', table:'ausencias'}, ()=>{
-      loadAbsences();
-    })
-    .subscribe();
+  if(!sb) return;
+  try {
+    sb.channel('ausencias-changes')
+      .on('postgres_changes', {event:'*', schema:'public', table:'ausencias'}, ()=>{
+        loadAbsences();
+      })
+      .subscribe();
+  } catch(err){
+    console.error('No se pudo suscribir a realtime:', err);
+  }
 }
 
 // ── UTILS ────────────────────────────────────────────────────────────────────
@@ -904,42 +928,63 @@ async function saveAbsence(){
     showToast('Ya existe ese registro');
     closeModal(); return;
   }
+  if(!sb){
+    showToast('Sin conexión a la base — no se pudo guardar');
+    closeModal(); return;
+  }
   const s=SCHEDULE[dia]&&SCHEDULE[dia][hora];
   const docente = s?s.docente:'';
   closeModal();
 
-  const {data, error} = await sb.from('ausencias')
-    .insert({mid, dia, hora, week, obs, docente})
-    .select()
-    .single();
+  try {
+    const {data, error} = await sb.from('ausencias')
+      .insert({mid, dia, hora, week, obs, docente})
+      .select()
+      .single();
 
-  if(error){
-    console.error('Error guardando ausencia:', error);
+    if(error){
+      console.error('Error guardando ausencia:', error);
+      showToast('No se pudo guardar — revisá tu conexión');
+      return;
+    }
+    absences.push(fromRow(data));
+    cacheAbsences();
+    render();
+    showToast('Ausencia registrada');
+  } catch(err){
+    console.error('Excepción guardando ausencia:', err);
     showToast('No se pudo guardar — revisá tu conexión');
-    return;
   }
-  absences.push(fromRow(data));
-  cacheAbsences();
-  render();
-  showToast('Ausencia registrada');
 }
 
 async function deleteAbs(id){
+  if(!sb){
+    showToast('Sin conexión a la base — no se pudo eliminar');
+    return;
+  }
   const prev = absences;
   absences = absences.filter(a=>a.id!==id);
   cacheAbsences();
   render(); // optimistic update — feels instant
 
-  const {error} = await sb.from('ausencias').delete().eq('id', id);
-  if(error){
-    console.error('Error borrando ausencia:', error);
-    absences = prev; // revert if the server rejected it
+  try {
+    const {error} = await sb.from('ausencias').delete().eq('id', id);
+    if(error){
+      console.error('Error borrando ausencia:', error);
+      absences = prev; // revert if the server rejected it
+      cacheAbsences();
+      render();
+      showToast('No se pudo eliminar — revisá tu conexión');
+      return;
+    }
+    showToast('Registro eliminado');
+  } catch(err){
+    console.error('Excepción borrando ausencia:', err);
+    absences = prev;
     cacheAbsences();
     render();
     showToast('No se pudo eliminar — revisá tu conexión');
-    return;
   }
-  showToast('Registro eliminado');
 }
 
 function showToast(msg){
